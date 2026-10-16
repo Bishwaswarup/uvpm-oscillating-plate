@@ -8,6 +8,7 @@ unsteady panel method and checked against thin-airfoil theory and Theodorsen.*
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![Tests](https://img.shields.io/badge/tests-7%20passing-2ea44f)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/1224850023.svg)](https://doi.org/10.5281/zenodo.23416701)
 
 **Bishwaswarup Nayak** · Indian Institute of Science, Bengaluru · term project, AE 221 Aerodynamics
 
