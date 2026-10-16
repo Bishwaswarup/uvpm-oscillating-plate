@@ -1,11 +1,11 @@
 """
-setup.py — Simulation Parameter Configuration
+config.py — Simulation Parameter Configuration
 AE 221 Aerodynamics | Term Paper | Question 3
 Unsteady Vortex Panel Method for Oscillating Flat Plate
 
 HOW TO USE:
   Edit the values in SimulationConfig below, then run:
-    python setup.py          → validates and previews your settings
+    python config.py         → validates and previews your settings
     python main.py           → runs the actual simulation
 
 COMPUTATIONAL COST GUIDE:
@@ -13,10 +13,11 @@ COMPUTATIONAL COST GUIDE:
   where M_wake = min(N_steps, wake_limit / (U_inf × dt))
 
   Preset modes (see PRESET at bottom):
-    'fast'      → ~5  seconds  | good for debugging
-    'balanced'  → ~30 seconds  | recommended for term paper
-    'accurate'  → ~3  minutes  | high resolution results
-    'research'  → ~15 minutes  | maximum fidelity
+    Measured on one laptop core; C_L amplitude relative to Theodorsen:
+    'fast'      → <1 s   | +1.6 %  | debugging
+    'balanced'  → ~4 s   | +1.6 %  | recommended
+    'accurate'  → ~10 s  | +1.5 %  | high resolution
+    'research'  → ~40 s  | +1.4 %  | convergence studies
 """
 
 import json
@@ -51,7 +52,7 @@ CUSTOM = {
 
     # dt: Time step (seconds)
     #   ↓ dt → more accurate wake convection, more steps needed
-    #   Stability limit: dt < c / (2 × U_inf) = 0.0125 s  ← never go below this
+    #   Stability limit: dt ≤ c / (2 × U_inf) = 0.0125 s  ← never exceed this
     #   For k=0.004 (quasi-steady), dt=0.05 is already over-resolved
     'dt'     : 0.0125,
 
@@ -68,9 +69,10 @@ CUSTOM = {
     'wake_chords': 50,
 
     # ── Numerics ─────────────────────────────────────────────────────
-    # rc: Vortex core radius (fraction of chord)
+    # rc: Vortex core radius (fraction of chord), applied to WAKE vortices only
     #   Too small → wake explosions when vortices get close
     #   Too large → artificially damps wake roll-up
+    #   (The bound-vortex AIC uses no core; see vortex_math.build_aic_matrix.)
     'rc_fraction': 0.05,      # rc = rc_fraction × c
 
     # epsilon: New wake vortex placement (fraction of U_inf × dt downstream of TE)
@@ -90,25 +92,25 @@ PRESETS = {
         'N': 20, 'dt': 0.1, 'T_total': 60.0,
         'wake_chords': 25, 'rc_fraction': 0.05,
         'epsilon': 0.5, 'cutoff_periods': 1,
-        '_note': 'Good for debugging. Wake has only ~10 vortices. Cl error ~5%.'
+        '_note': 'Debugging. Only ~6 wake vortices. C_L amplitude +1.6 % vs Theodorsen.'
     },
     'balanced': {
         'N': 50, 'dt': 0.0125, 'T_total': 60.0,
         'wake_chords': 50, 'rc_fraction': 0.05,
         'epsilon': 0.5, 'cutoff_periods': 1,
-        '_note': 'Recommended for term paper. ~25 wake vortices. Cl error <1%.'
+        '_note': 'Recommended. ~100 wake vortices. C_L amplitude +1.6 % vs Theodorsen.'
     },
     'accurate': {
         'N': 80, 'dt': 0.0125, 'T_total': 80.0,
         'wake_chords': 80, 'rc_fraction': 0.03,
         'epsilon': 0.5, 'cutoff_periods': 2,
-        '_note': 'High fidelity. ~40 wake vortices. Cl error <0.1%.'
+        '_note': 'High fidelity. ~160 wake vortices. C_L amplitude +1.5 % vs Theodorsen.'
     },
     'research': {
         'N': 100, 'dt': 0.01, 'T_total': 100.0,
         'wake_chords': 100, 'rc_fraction': 0.02,
         'epsilon': 0.5, 'cutoff_periods': 2,
-        '_note': 'Maximum fidelity. ~100 wake vortices. For convergence studies.'
+        '_note': 'Convergence studies. ~250 wake vortices. C_L amplitude +1.4 % vs Theodorsen.'
     },
 }
 
@@ -203,7 +205,9 @@ def get_runtime_paths(base_dir=None):
         'cache_root': cache_root,
         'mpl_cache': cache_root / 'matplotlib',
         'fontconfig_cache': cache_root / 'fontconfig',
-        'snapshot': root / 'simulation_params_snapshot.json',
+        'snapshot': root / 'results' / 'simulation_params_snapshot.json',
+        'figures': root / 'figures',
+        'results': root / 'results',
     }
 
 
@@ -211,9 +215,10 @@ def configure_runtime_environment(base_dir=None):
     paths = get_runtime_paths(base_dir)
     paths['mpl_cache'].mkdir(parents=True, exist_ok=True)
     paths['fontconfig_cache'].mkdir(parents=True, exist_ok=True)
+    paths['figures'].mkdir(parents=True, exist_ok=True)
+    paths['results'].mkdir(parents=True, exist_ok=True)
     os.environ.setdefault('MPLCONFIGDIR', str(paths['mpl_cache']))
     os.environ.setdefault('XDG_CACHE_HOME', str(paths['cache_root']))
-    os.environ.setdefault('FONTCONFIG_PATH', '/opt/homebrew/etc/fonts')
     if not os.environ.get('DISPLAY'):
         os.environ.setdefault('MPLBACKEND', 'Agg')
     return paths
@@ -352,7 +357,7 @@ def preview():
     print("═"*55 + "\n")
 
     snapshot_path = write_snapshot(params)
-    print(f"  Params saved → {snapshot_path.name}\n")
+    print(f"  Params saved → results/{snapshot_path.name}\n")
 
 
 if __name__ == '__main__':

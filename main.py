@@ -1,15 +1,16 @@
+import json
 import os
 
 import numpy as np
 
-from setup import configure_runtime_environment, get_params, get_grid, write_snapshot
+from config import configure_runtime_environment, get_params, get_grid, write_snapshot
 from kinematics import get_kinematics, update_geometry
-from vortex_math import build_aic_matrix
-from solver import build_rhs_array, solve_bound_circulation
-from wake_management import convect_wake, shed_new_vortex
-from forces import calculate_forces, calculate_pressure_distribution
+from forces import calculate_pressure_distribution
+from simulate import simulate
 
-configure_runtime_environment()
+PATHS = configure_runtime_environment()
+FIG = PATHS['figures']
+RES = PATHS['results']
 
 from post_processing import (
     save_cp_distribution_plot,
@@ -33,80 +34,14 @@ print(f"Starting simulation: preset='{params['_preset']}' | "
       f"N={params['N']} | dt={params['dt']} | "
       f"N_steps={params['N_steps']} | max_wake≈{params['_M_max_wake']}")
 
-# Storage
-Cl_history, Cd_history, Cm_history = [], [], []
-alpha_history, h_history = [], []
-
-# Wake arrays
-wake_X     = np.array([])
-wake_Z     = np.array([])
-wake_Gamma = np.array([])
-
-# Previous bound circulation (zero → starts from rest)
-Gamma_bound_prev = np.zeros(params['N'])
-Gamma_bound_final = None
-Gamma_bound_final_prev = None
-
-# 2. Main Time-Stepping Loop
-for step in range(params['N_steps']):
-    t = step * params['dt']
-
-    # A. Update geometry & kinematics
-    geometry = update_geometry(t, params, grid)
-
-    # B. Convect existing wake using PREVIOUS bound circulation
-    wake_X, wake_Z = convect_wake(
-        wake_X, wake_Z, wake_Gamma, geometry, Gamma_bound_prev, params
-    )
-
-    # C. Build AIC matrix and RHS (wake influence included)
-    AIC_matrix = build_aic_matrix(geometry, params['rc'])
-    RHS        = build_rhs_array(geometry, params, wake_X, wake_Z, wake_Gamma)
-
-    # D. Solve for bound circulation
-    Gamma_bound_curr = solve_bound_circulation(AIC_matrix, RHS)
-
-    # E. Shed new wake vortex (Kelvin's theorem)
-    x_new, z_new, g_new = shed_new_vortex(
-        Gamma_bound_prev, Gamma_bound_curr, geometry, params
-    )
-
-    # F. Append new vortex
-    wake_X     = np.append(wake_X,     x_new)
-    wake_Z     = np.append(wake_Z,     z_new)
-    wake_Gamma = np.append(wake_Gamma, g_new)
-
-    # F2. Truncate far wake — keeps M bounded
-    far_wake_limit = geometry['X_TE'] + params['wake_chords'] * params['c']
-    keep       = wake_X < far_wake_limit
-    wake_X     = wake_X[keep]
-    wake_Z     = wake_Z[keep]
-    wake_Gamma = wake_Gamma[keep]
-
-    # G. Calculate unsteady forces
-    Cl, Cd, Cm = calculate_forces(
-        Gamma_bound_curr, Gamma_bound_prev, geometry, params, grid
-    )
-
-    # Diagnostic print every 100 steps
-    if step % 100 == 0:
-        print(f"Step {step:4d} | t={t:6.2f}s | "
-              f"Wake vortices: {len(wake_Gamma):3d} | Cl={Cl:.4f}")
-
-    # H. Store data
-    Cl_history.append(Cl)
-    Cd_history.append(Cd)
-    Cm_history.append(Cm)
-    alpha_history.append(np.degrees(geometry['alpha']))
-    h_history.append(geometry['h'])
-
-    if step == params['N_steps'] - 1:
-        Gamma_bound_final = Gamma_bound_curr.copy()
-        Gamma_bound_final_prev = Gamma_bound_prev.copy()
-
-    Gamma_bound_prev = Gamma_bound_curr.copy()
-
+sim = simulate(params, grid)
 print("Simulation complete.")
+
+wake_X, wake_Z, wake_Gamma = sim['wake_X'], sim['wake_Z'], sim['wake_Gamma']
+geometry = sim['geometry']
+Gamma_bound_final, Gamma_bound_final_prev = sim['Gamma_bound'], sim['Gamma_bound_prev']
+Cl_history, Cd_history, Cm_history = sim['Cl'], sim['Cd'], sim['Cm']
+alpha_history, h_history = sim['alpha_deg'], sim['h']
 
 # 3. Post-processing
 alpha_deg = np.array(alpha_history)
@@ -120,7 +55,7 @@ alpha_rad_arr = np.zeros_like(time_arr)
 for i, t in enumerate(time_arr):
     _, _, alpha_rad_arr[i], _ = get_kinematics(t, params)
 
-# Discard startup transient (set in setup.py via cutoff_periods)
+# Discard startup transient (set in config.py via cutoff_periods)
 cutoff     = params['cutoff']
 alpha_clean = alpha_deg[cutoff:]
 Cl_clean    = Cl_arr[cutoff:]
@@ -154,8 +89,8 @@ ax_cl.set_ylabel('$C_L$')
 ax_cl.set_xlabel('Time (s)')
 ax_cl.grid(True)
 plt.tight_layout()
-plt.savefig('cl_history.png', dpi=300)
-print("Saved → cl_history.png")
+plt.savefig(FIG / 'cl_history.png', dpi=200)
+print("Saved → figures/cl_history.png")
 
 # PLOT 2: Drag time history
 fig_cd, ax_cd = plt.subplots(figsize=(10, 4))
@@ -169,8 +104,8 @@ ax_cd.set_ylabel('$C_D$')
 ax_cd.set_xlabel('Time (s)')
 ax_cd.grid(True)
 plt.tight_layout()
-plt.savefig('cd_history.png', dpi=300)
-print("Saved → cd_history.png")
+plt.savefig(FIG / 'cd_history.png', dpi=200)
+print("Saved → figures/cd_history.png")
 
 # PLOT 3: Moment time history
 fig_cm, ax_cm = plt.subplots(figsize=(10, 4))
@@ -184,8 +119,8 @@ ax_cm.set_ylabel('$C_M$')
 ax_cm.set_xlabel('Time (s)')
 ax_cm.grid(True)
 plt.tight_layout()
-plt.savefig('cm_history.png', dpi=300)
-print("Saved → cm_history.png")
+plt.savefig(FIG / 'cm_history.png', dpi=200)
+print("Saved → figures/cm_history.png")
 
 # PLOT 4: Hysteresis
 fig2, ax2 = plt.subplots(1, 2, figsize=(12, 5))
@@ -213,8 +148,8 @@ ax2[1].set_ylabel('$C_M$')
 ax2[1].grid(True)
 
 plt.tight_layout()
-plt.savefig('alpha_hysteresis.png', dpi=300)
-print("Saved → alpha_hysteresis.png")
+plt.savefig(FIG / 'alpha_hysteresis.png', dpi=200)
+print("Saved → figures/alpha_hysteresis.png")
 
 # PLOT 5: Wake geometry
 plt.figure(figsize=(12, 3))
@@ -240,20 +175,20 @@ plt.legend()
 plt.grid(True)
 plt.axis('equal')
 plt.tight_layout()
-plt.savefig('wake_after_plate.png', dpi=300)
-print("Saved → wake_after_plate.png")
+plt.savefig(FIG / 'wake_after_plate.png', dpi=200)
+print("Saved → figures/wake_after_plate.png")
 
-save_kinematics_plot(time_arr, h_arr, alpha_deg, params, 'kinematics.png')
-print("Saved → kinematics.png")
+save_kinematics_plot(time_arr, h_arr, alpha_deg, params, FIG / 'kinematics.png')
+print("Saved → figures/kinematics.png")
 
 phase_times = [0.0, 0.25 * params['_T_osc'], 0.5 * params['_T_osc'], 0.75 * params['_T_osc'], params['_T_osc']]
 phase_geometries = [update_geometry(t_phase, params, grid) for t_phase in phase_times]
-save_motion_phase_schematic(phase_times, phase_geometries, params, 'motion_phase_schematic.png')
-print("Saved → motion_phase_schematic.png")
+save_motion_phase_schematic(phase_times, phase_geometries, params, FIG / 'motion_phase_schematic.png')
+print("Saved → figures/motion_phase_schematic.png")
 
 schematic_geometry = update_geometry(0.0, params, grid)
-save_panel_schematic(params, grid, schematic_geometry, 'panel_schematic.png')
-print("Saved → panel_schematic.png")
+save_panel_schematic(params, grid, schematic_geometry, FIG / 'panel_schematic.png')
+print("Saved → figures/panel_schematic.png")
 
 h_effective, h_dot_effective, alpha_effective, _ = get_kinematics(0.0, params)
 effective_geometry = update_geometry(0.0, params, grid)
@@ -261,9 +196,9 @@ save_effective_alpha_sketch(
     effective_geometry,
     h_dot_effective,
     params,
-    'effective_alpha_sketch.png',
+    FIG / 'effective_alpha_sketch.png',
 )
-print("Saved → effective_alpha_sketch.png")
+print("Saved → figures/effective_alpha_sketch.png")
 
 _, Cp_jump_final = calculate_pressure_distribution(
     Gamma_bound_final, Gamma_bound_final_prev, params, grid
@@ -272,9 +207,9 @@ save_cp_distribution_plot(
     grid['x_c_local'] / params['c'],
     Cp_jump_final,
     time_arr[-1],
-    'cp_distribution.png',
+    FIG / 'cp_distribution.png',
 )
-print("Saved → cp_distribution.png")
+print("Saved → figures/cp_distribution.png")
 
 cycle_steps = max(2, int(round(params['_T_osc'] / params['dt'])))
 cycle_start = max(cutoff, params['N_steps'] - cycle_steps)
@@ -295,9 +230,9 @@ save_theodorsen_comparison_plot(
     cl_theodorsen_cycle,
     c_k,
     params,
-    'theodorsen_comparison.png',
+    FIG / 'theodorsen_comparison.png',
 )
-print("Saved → theodorsen_comparison.png")
+print("Saved → figures/theodorsen_comparison.png")
 
 peak_rows = [
     extrema_row('h_m', h_arr, time_arr),
@@ -307,8 +242,36 @@ peak_rows = [
     extrema_row('Cm_le', Cm_clean, time_clean),
     extrema_row('Cl_theodorsen', cl_theodorsen_cycle, time_cycle),
 ]
-save_peak_values_table(peak_rows, 'peak_values.csv')
-print("Saved → peak_values.csv")
+save_peak_values_table(peak_rows, RES / 'peak_values.csv')
+print("Saved → results/peak_values.csv")
+
+# Amplitude and phase of the numerical lift against Theodorsen over the
+# post-transient record (first harmonic at the forcing frequency).
+from post_processing import harmonic_amplitude
+cl_th_clean, cl_qs_clean, _ = theodorsen_lift_series(
+    alpha_rad_arr[cutoff:], h_arr[cutoff:], time_clean, params['omega'], params['c'], params['U_inf']
+)
+amp_num = harmonic_amplitude(Cl_clean, time_clean, params['omega'])
+amp_th = harmonic_amplitude(cl_th_clean, time_clean, params['omega'])
+summary = {
+    'preset': params['_preset'],
+    'N': params['N'], 'dt': params['dt'], 'T_total': params['T_total'],
+    'wake_chords': params['wake_chords'], 'rc': params['rc'],
+    'reduced_frequency_k': params['_k_reduced'],
+    'theodorsen_C_k': [float(c_k.real), float(c_k.imag)],
+    'cl_amplitude_uvpm': float(abs(amp_num)),
+    'cl_amplitude_theodorsen': float(abs(amp_th)),
+    'cl_amplitude_ratio': float(abs(amp_num) / abs(amp_th)),
+    'cl_phase_difference_deg': float(np.degrees(np.angle(amp_num / amp_th))),
+    'cm_le_amplitude': float(abs(harmonic_amplitude(Cm_clean, time_clean, params['omega']))),
+    'cd_pressure_max': float(Cd_clean.max()),
+    'wake_vortices_final': int(len(wake_Gamma)),
+}
+with open(RES / 'summary.json', 'w') as fh:
+    json.dump(summary, fh, indent=2)
+print("Saved → results/summary.json")
+print(f"C_L amplitude: UVPM {summary['cl_amplitude_uvpm']:.5f}, Theodorsen {summary['cl_amplitude_theodorsen']:.5f} "
+      f"(ratio {summary['cl_amplitude_ratio']:.4f}, phase {summary['cl_phase_difference_deg']:+.2f} deg)")
 
 if os.environ.get('MPLBACKEND', '').lower() != 'agg':
     plt.show()
